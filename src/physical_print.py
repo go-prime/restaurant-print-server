@@ -86,7 +86,7 @@ def print_file(file_path, printer):
     file_path = os.path.abspath(file_path)
     all_printers = [printer[2] for printer in win32print.EnumPrinters(6)]
     if not printer in all_printers:
-        raise PrintError("Printer not found")
+        raise PrintError(f"Printer {printer} not found. These are available: {all_printers}")
 
     win32api.ShellExecute(0, "print", file_path, f'"{printer}"', ".", 3)
 
