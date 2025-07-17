@@ -21,6 +21,29 @@ def copy_files_between_machines(source, destination):
 def get_contents_of_folder(folder):
     return os.listdir(folder)
 
+def write_bytes_to_file(data, file_path):
+    """
+    Write bytes data to a file
+    
+    Args:
+        data: bytes or string data to write
+        file_path: path where to write the file
+    """
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        with open(file_path, 'wb') as f:
+            if isinstance(data, str):
+                # If string, encode to bytes using latin-1 to preserve ESC/POS commands
+                f.write(data.encode('latin-1'))
+            else:
+                # If already bytes, write directly
+                f.write(data)
+                
+    except Exception as e:
+        raise IOError(f"Failed to write file {file_path}: {str(e)}")
+
 
 def main():
     source = "job.html"
