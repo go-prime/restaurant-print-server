@@ -52,9 +52,11 @@ def print_job(job, printer):
 
     already_printed = (select(PrintJob)
         .where(PrintJob.document_type == job['documentType'])
-        .where(PrintJob.document_number == job['documentNumber']))
+        .where(PrintJob.document_number == job['documentNumber'])
+        .where(PrintJob.print_status == "Success")
+    )
 
-    if session.execute(already_printed).first():
+    if session.execute(already_printed).first() and not job['reprint']:
         log_error(job, "Document already printed")
         raise PrintError("Document already printed")
 
