@@ -56,7 +56,7 @@ def print_job(job, printer):
         .where(PrintJob.print_status == "Success")
     )
 
-    if session.execute(already_printed).first() and not job['reprint']:
+    if session.execute(already_printed).first() and not job.get('reprint'):
         log_error(job, "Document already printed")
         raise PrintError("Document already printed")
 
