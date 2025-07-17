@@ -60,15 +60,38 @@ def print_job(job, printer):
         log_error(job, "Document already printed")
         raise PrintError("Document already printed")
 
+    try:
+        decoded_content = base64.b64decode(job['content']).decode('utf-8')
+    except Exception as e:
+        log_error(job, f"Failed to decode content: {str(e)}")
+        raise ValueError(f"Failed to decode content: {str(e)}")
+    
+    # Add ESC/POS commands for margin removal
+    ESC = '\x1b'
+    formatted_content = (
+        ESC + '@' +           # Initialize printer
+        ESC + 'l' + '\x00' +  # Left margin = 0
+        ESC + 'Q' + '\x00' +  # Right margin = 0
+        decoded_content +
+        ESC + 'i'             # Cut paper
+    )
+    
     out_file = os.path.abspath(os.path.join('..', 'temp', job['documentNumber']))
     out = out_file + ".txt"
-    document_name = job['documentNumber'] + ".txt"
-
-    write_string_to_file(job['content'], out)
+    
+    # Write as bytes directly
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, 'wb') as f:
+            f.write(formatted_content.encode('latin-1'))
+    except Exception as e:
+        log_error(job, f"Failed to write file: {str(e)}")
+        raise IOError(f"Failed to write file: {str(e)}")
+    
     if not os.path.exists(out):
         log_error(job, "File not created.")
-        raise PrintError("File not created.")
-
+        raise FileNotFoundError("File not created.")
+    
     print_file(out, printer)
 
     print_log = insert(PrintJob).values(
@@ -85,13 +108,34 @@ def print_job(job, printer):
 
 
 def print_file(file_path, printer):
-    file_path = os.path.abspath(file_path)
-    all_printers = [printer[2] for printer in win32print.EnumPrinters(6)]
-    if not printer in all_printers:
-        raise PrintError(f"Printer {printer} not found. These are available: {all_printers}")
-
-    win32api.ShellExecute(0, "print", file_path, f'"{printer}"', ".", 3)
-
+    """Print file directly to printer using raw data"""
+    try:
+        # Read the file content
+        with open(file_path, 'rb') as f:
+            raw_data = f.read()
+        
+        # Open printer
+        printer_handle = win32print.OpenPrinter(printer)
+        
+        # Start print job
+        job_info = ("Python Print Job", None, "RAW")
+        job_id = win32print.StartDocPrinter(printer_handle, 1, job_info)
+        
+        # Start page
+        win32print.StartPagePrinter(printer_handle)
+        
+        # Send raw data to printer
+        win32print.WritePrinter(printer_handle, raw_data)
+        
+        # End page and job
+        win32print.EndPagePrinter(printer_handle)
+        win32print.EndDocPrinter(printer_handle)
+        
+        # Close printer
+        win32print.ClosePrinter(printer_handle)
+        
+    except Exception as e:
+        raise PrintError(f"Failed to print: {str(e)}")
 
 def main():
     print_file("invoice.txt", "HP598857 (HP DeskJet Plus 4100 series)")

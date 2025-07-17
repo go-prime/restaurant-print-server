@@ -57,6 +57,12 @@ python app.py
 9. Make the app a background task with windows task scheduler.
 WIP
 
+10. Reverse proxy with ngrok
+Start the print server with windows task scheduler 
+Enter the following command in command prompt 
+`ngrok http http://localhost:9090`
+copy the ngrok URL into the print dashboard on the backend 
+
 ---
 * On windows, installing most packages using chocolatey is the preferred approach for reliability.
 * Follow [this](https://learn.microsoft.com/en-us/troubleshoot/windows-server/printing/print-to-file-without-user-intervention) guide to setup a generic test printer 
