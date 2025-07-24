@@ -3,3 +3,4 @@ logs/*.*
 .env
 temp/*.*
 __pycache__/
+src/instance/print.db
