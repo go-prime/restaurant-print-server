@@ -150,31 +150,6 @@ def print_job(job, printer):
         raise PrintError("Document already printed")
 
     try:
-<<<<<<< HEAD
-        decoded_content = base64.b64decode(job['content']).decode('utf-8')
-    except Exception as e:
-        log_error(job, f"Failed to decode content: {str(e)}")
-        raise ValueError(f"Failed to decode content: {str(e)}")
-    
-    # Add ESC/POS commands for margin removal
-    ESC = '\x1b'
-    formatted_content = (
-        ESC + '@' +           # Initialize printer
-        ESC + 'l' + '\x00' +  # Left margin = 0
-        ESC + 'Q' + '\x00' +  # Right margin = 0
-        decoded_content +
-        ESC + 'i'             # Cut paper
-    )
-    
-    out_file = os.path.abspath(os.path.join('..', 'temp', job['documentNumber']))
-    out = out_file + ".txt"
-    
-    # Write as bytes directly
-    try:
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, 'wb') as f:
-            f.write(formatted_content.encode('latin-1'))
-=======
         # Decode content
         decoded_content = base64.b64decode(job['content']).decode('utf-8')
         
@@ -194,7 +169,6 @@ def print_job(job, printer):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'wb') as f:
             f.write(formatted_content)
->>>>>>> d67a1051b3c9852358c03dbc252e20206dc2e856
     except Exception as e:
         log_error(job, f"Failed to write file: {str(e)}")
         raise IOError(f"Failed to write file: {str(e)}")
