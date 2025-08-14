@@ -20,70 +20,83 @@ class PrintError(Exception):
 
 
 class ESCPOSFormatter:
-    """Convert simple markup to ESC/POS commands"""
+    """Convert simple markup to ESC/POS commands for TM-T20III"""
     
     def __init__(self):
         # ESC/POS command constants
         self.ESC = b'\x1b'
         self.GS = b'\x1d'
         
-        # Text formatting commands
+        # TM-T20III specific commands based on documentation
         self.commands = {
-            'INIT': self.ESC + b'@',           # Initialize printer
-            'BOLD_ON': self.ESC + b'E',        # Bold on
-            'BOLD_OFF': self.ESC + b'F',       # Bold off
-            'UNDERLINE_ON': self.ESC + b'-1',  # Underline on
-            'UNDERLINE_OFF': self.ESC + b'-0', # Underline off
-            'SIZE_NORMAL': self.GS + b'!0',    # Normal size
-            'SIZE_LARGE': self.GS + b'!1',     # Large size
-            'ALIGN_LEFT': self.ESC + b'a0',    # Left align
-            'ALIGN_CENTER': self.ESC + b'a1',  # Center align
-            'ALIGN_RIGHT': self.ESC + b'a2',   # Right align
-            'CUT': self.ESC + b'i',            # Cut paper
-            'FEED_LINE': b'\n',                # Line feed
-            'MARGIN_LEFT_0': self.ESC + b'l\x00',  # Left margin = 0
-            'MARGIN_RIGHT_0': self.ESC + b'Q\x00', # Right margin = 0
+            'INIT': self.ESC + b'@',                    # Initialize printer
+            'BOLD_ON': self.ESC + b'E\x01',             # Turn emphasized mode on
+            'BOLD_OFF': self.ESC + b'E\x00',            # Turn emphasized mode off
+            'UNDERLINE_ON': self.ESC + b'-\x01',        # Turn underline mode on
+            'UNDERLINE_OFF': self.ESC + b'-\x00',       # Turn underline mode off
+            'SIZE_NORMAL': self.GS + b'!\x00',          # Select character size (normal)
+            'SIZE_LARGE': self.GS + b'!\x11',           # Select character size (double width & height)
+            'SIZE_WIDE': self.GS + b'!\x10',            # Select character size (double width)
+            'SIZE_TALL': self.GS + b'!\x01',            # Select character size (double height)
+            'ALIGN_LEFT': self.ESC + b'a\x00',          # Select justification (left)
+            'ALIGN_CENTER': self.ESC + b'a\x01',        # Select justification (center)
+            'ALIGN_RIGHT': self.ESC + b'a\x02',         # Select justification (right)
+            'CUT_PARTIAL': self.ESC + b'i',             # Partial cut (one point left uncut)
+            'CUT_FULL': self.ESC + b'm',                # Partial cut (three points left uncut)
+            'FEED_LINE': b'\n',                         # Line feed
+            'FEED_AND_CUT': self.ESC + b'd\x03' + self.ESC + b'i',  # Feed 3 lines then cut
+            'SET_LINE_SPACING_DEFAULT': self.ESC + b'2', # Select default line spacing
+            'DOUBLE_STRIKE_ON': self.ESC + b'G\x01',    # Turn double-strike mode on
+            'DOUBLE_STRIKE_OFF': self.ESC + b'G\x00',   # Turn double-strike mode off
         }
     
     def convert_markup_to_escpos(self, text: str) -> bytes:
         """Convert markup text to ESC/POS commands"""
         
-        # Initialize with clear margins
-        result = self.commands['INIT'] + self.commands['MARGIN_LEFT_0'] + self.commands['MARGIN_RIGHT_0']
-        
-        # Track current state
-        current_state = {
-            'bold': False,
-            'underline': False,
-            'size': 'normal',
-            'align': 'left'
-        }
+        # Initialize printer
+        result = self.commands['INIT']
         
         # Process the text
-        processed_text = self._process_markup(text, current_state)
+        processed_text = self._process_markup(text)
         result += processed_text.encode('latin-1', errors='ignore')
         
         return result
     
-    def _process_markup(self, text: str, state: Dict) -> str:
+    def _process_markup(self, text: str) -> str:
         """Process markup tags and convert to ESC/POS"""
         
         # Define tag patterns and their ESC/POS equivalents
         patterns = [
+            # Text formatting
             (r'\[B\](.*?)\[/B\]', self._handle_bold),
             (r'\[U\](.*?)\[/U\]', self._handle_underline),
-            (r'\[L\](.*?)\[/L\]', self._handle_large),
-            (r'\[N\](.*?)\[/N\]', self._handle_normal),
+            (r'\[DS\](.*?)\[/DS\]', self._handle_double_strike),  # Double strike
+            
+            # Size controls
+            (r'\[L\](.*?)\[/L\]', self._handle_large),           # Large (double width & height)
+            (r'\[W\](.*?)\[/W\]', self._handle_wide),            # Wide (double width)
+            (r'\[T\](.*?)\[/T\]', self._handle_tall),            # Tall (double height)
+            (r'\[N\](.*?)\[/N\]', self._handle_normal),          # Normal size
+            
+            # Alignment
             (r'\[C\](.*?)\[/C\]', self._handle_center),
             (r'\[R\](.*?)\[/R\]', self._handle_right),
+            (r'\[LEFT\](.*?)\[/LEFT\]', self._handle_left),      # Explicit left align
+            
+            # Paper control
             (r'\[CUT\]', self._handle_cut),
+            (r'\[CUT:FULL\]', self._handle_cut_full),
             (r'\[FEED:(\d+)\]', self._handle_feed),
+            
+            # Special commands
+            (r'\[BUZZER\]', self._handle_buzzer),
+            (r'\[BUZZER:(\d+)\]', self._handle_buzzer_times),
         ]
         
         result = text
         
         for pattern, handler in patterns:
-            result = re.sub(pattern, handler, result, flags=re.DOTALL)
+            result = re.sub(pattern, handler, result, flags=re.DOTALL | re.IGNORECASE)
         
         return result
     
@@ -95,9 +108,21 @@ class ESCPOSFormatter:
         content = match.group(1)
         return f"{self.commands['UNDERLINE_ON'].decode('latin-1')}{content}{self.commands['UNDERLINE_OFF'].decode('latin-1')}"
     
+    def _handle_double_strike(self, match) -> str:
+        content = match.group(1)
+        return f"{self.commands['DOUBLE_STRIKE_ON'].decode('latin-1')}{content}{self.commands['DOUBLE_STRIKE_OFF'].decode('latin-1')}"
+    
     def _handle_large(self, match) -> str:
         content = match.group(1)
         return f"{self.commands['SIZE_LARGE'].decode('latin-1')}{content}{self.commands['SIZE_NORMAL'].decode('latin-1')}"
+    
+    def _handle_wide(self, match) -> str:
+        content = match.group(1)
+        return f"{self.commands['SIZE_WIDE'].decode('latin-1')}{content}{self.commands['SIZE_NORMAL'].decode('latin-1')}"
+    
+    def _handle_tall(self, match) -> str:
+        content = match.group(1)
+        return f"{self.commands['SIZE_TALL'].decode('latin-1')}{content}{self.commands['SIZE_NORMAL'].decode('latin-1')}"
     
     def _handle_normal(self, match) -> str:
         content = match.group(1)
@@ -111,12 +136,32 @@ class ESCPOSFormatter:
         content = match.group(1)
         return f"{self.commands['ALIGN_RIGHT'].decode('latin-1')}{content}{self.commands['ALIGN_LEFT'].decode('latin-1')}"
     
+    def _handle_left(self, match) -> str:
+        content = match.group(1)
+        return f"{self.commands['ALIGN_LEFT'].decode('latin-1')}{content}"
+    
     def _handle_cut(self, match) -> str:
-        return self.commands['CUT'].decode('latin-1')
+        return self.commands['CUT_PARTIAL'].decode('latin-1')
+    
+    def _handle_cut_full(self, match) -> str:
+        return self.commands['CUT_FULL'].decode('latin-1')
     
     def _handle_feed(self, match) -> str:
         lines = int(match.group(1))
-        return '\n' * lines
+        if lines <= 255:  # ESC d command takes a single byte parameter
+            return (self.ESC + b'd' + bytes([lines])).decode('latin-1')
+        else:
+            # For more than 255 lines, use multiple commands or line feeds
+            return '\n' * lines
+    
+    def _handle_buzzer(self, match) -> str:
+        # Sound buzzer once (DLE DC4 fn=3)
+        return '\x10\x14\x03'
+    
+    def _handle_buzzer_times(self, match) -> str:
+        # Sound buzzer multiple times
+        times = int(match.group(1))
+        return '\x10\x14\x03' * min(times, 10)  # Limit to prevent excessive buzzing
 
 def log_error(job, error):
     from models import ErrorLog
