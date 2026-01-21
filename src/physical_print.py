@@ -2,9 +2,8 @@ import win32api
 import win32print
 import os
 
-
 from sqlalchemy import create_engine, select, insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import scoped_session, sessionmaker
 import datetime
 import base64
 import re
@@ -13,7 +12,8 @@ from loggers import logger
 
 
 engine = create_engine("sqlite:///instance//print.db", echo=True)
-session = Session(bind=engine)
+session_factory = sessionmaker(bind=engine)
+Session = scoped_session(session_factory)
 
 class PrintError(Exception):
     pass
@@ -166,14 +166,23 @@ class ESCPOSFormatter:
 def log_error(job, error):
     from models import ErrorLog
     logger.error("Error: %s" % error)
-    err_log = insert(ErrorLog).values(
-        creation_date=datetime.datetime.now(),
-        document_number=job['documentNumber'],
-        status="Error",
-        error=error
-    )
-    session.execute(err_log)
-    session.commit()
+    
+    # Get thread-local session
+    session = Session()
+    try:
+        err_log = insert(ErrorLog).values(
+            creation_date=datetime.datetime.now(),
+            document_number=job['documentNumber'],
+            status="Error",
+            error=error
+        )
+        session.execute(err_log)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Failed to log error: {str(e)}")
+    finally:
+        Session.remove()  # Clean up the session
 
 
 def print_job(job, printer):
@@ -183,59 +192,69 @@ def print_job(job, printer):
     from utils.io import write_string_to_file
     from models import PrintJob
 
-    # Check if already printed
-    already_printed = (select(PrintJob)
-        .where(PrintJob.document_type == job['documentType'])
-        .where(PrintJob.document_number == job['documentNumber'])
-        .where(PrintJob.print_status == "Success")
-    )
-
-    if session.execute(already_printed).first() and not job.get('reprint'):
-        log_error(job, "Document already printed")
-        raise PrintError("Document already printed")
-
-    try:
-        # Decode content
-        decoded_content = base64.b64decode(job['content']).decode('utf-8')
-        
-        # Convert markup to ESC/POS
-        formatter = ESCPOSFormatter()
-        formatted_content = formatter.convert_markup_to_escpos(decoded_content)
-        
-    except Exception as e:
-        log_error(job, f"Failed to process content: {str(e)}")
-        raise ValueError(f"Failed to process content: {str(e)}")
-    
-    # Write to file
-    out_file = os.path.abspath(os.path.join('..', 'temp', job['documentNumber']))
-    out = out_file + ".txt"
+    # Get thread-local session
+    session = Session()
     
     try:
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out, 'wb') as f:
-            f.write(formatted_content)
+        # Check if already printed
+        already_printed = (select(PrintJob)
+            .where(PrintJob.document_type == job['documentType'])
+            .where(PrintJob.document_number == job['documentNumber'])
+            .where(PrintJob.print_status == "Success")
+        )
+
+        if session.execute(already_printed).first() and not job.get('reprint'):
+            log_error(job, "Document already printed")
+            raise PrintError("Document already printed")
+
+        try:
+            # Decode content
+            decoded_content = base64.b64decode(job['content']).decode('utf-8')
+            
+            # Convert markup to ESC/POS
+            formatter = ESCPOSFormatter()
+            formatted_content = formatter.convert_markup_to_escpos(decoded_content)
+            
+        except Exception as e:
+            log_error(job, f"Failed to process content: {str(e)}")
+            raise ValueError(f"Failed to process content: {str(e)}")
+        
+        # Write to file
+        out_file = os.path.abspath(os.path.join('..', 'temp', job['documentNumber']))
+        out = out_file + ".txt"
+        
+        try:
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, 'wb') as f:
+                f.write(formatted_content)
+        except Exception as e:
+            log_error(job, f"Failed to write file: {str(e)}")
+            raise IOError(f"Failed to write file: {str(e)}")
+        
+        if not os.path.exists(out):
+            log_error(job, "File not created.")
+            raise FileNotFoundError("File not created.")
+        
+        print_file(out, printer)
+
+        # Log success
+        print_log = insert(PrintJob).values(
+            creation_date=datetime.datetime.now(),
+            modified=datetime.datetime.now(),
+            document_type=job['documentType'],
+            document_number=job['documentNumber'],
+            print_status="Success",
+            error_message="",
+        )
+
+        session.execute(print_log)
+        session.commit()
+        
     except Exception as e:
-        log_error(job, f"Failed to write file: {str(e)}")
-        raise IOError(f"Failed to write file: {str(e)}")
-    
-    if not os.path.exists(out):
-        log_error(job, "File not created.")
-        raise FileNotFoundError("File not created.")
-    
-    print_file(out, printer)
-
-    # Log success
-    print_log = insert(PrintJob).values(
-        creation_date=datetime.datetime.now(),
-        modified=datetime.datetime.now(),
-        document_type=job['documentType'],
-        document_number=job['documentNumber'],
-        print_status="Success",
-        error_message="",
-    )
-
-    session.execute(print_log)
-    session.commit()
+        session.rollback()
+        raise
+    finally:
+        Session.remove()
 
 
 def print_file(file_path, printer):
