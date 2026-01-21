@@ -1,17 +1,17 @@
 
 
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, session, g
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 # from loggers import logger
 from flask_dotenv import DotEnv
-from physical_print import PrintError, print_job
+from physical_print import PrintError, print_job, get_session
 from loggers import logger
 from dotenv import load_dotenv
 import os
 import traceback
 
-app= Flask(__name__)
+app = Flask(__name__)
 login_manager = LoginManager()
 
 SESSION_TYPE = 'filesystem'
@@ -22,6 +22,18 @@ db = SQLAlchemy(app)
 env = DotEnv(app)
 login_manager.init_app(app)
 app.secret_key = os.environ.get("SECRET_KEY")
+
+
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    """Clean up database session at end of request."""
+    session = g.pop('db_session', None)
+    if session is not None:
+        if exception:
+            session.rollback()
+        else:
+            session.commit()
+        session.close()
 
 
 @login_manager.user_loader
